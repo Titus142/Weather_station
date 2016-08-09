@@ -6,7 +6,7 @@ $current = get_data('http://api.wunderground.com/api/efa3f64211db75ba/conditions
 
 
 date_default_timezone_set('America/New_York');
-$hour = date(G);
+$hour = date('G');
 
 
 
@@ -35,11 +35,6 @@ $bar = intval($current_d['current_observation']['pressure_mb']);
 
 
 print "<$temp,$hum,$pop,$bar>";
-
-
-//printf("Temp: %s\n Humidity: %s\n Pressure: %s\n POP: %s\n WindSpd: %s\n", $temp, $hum, $bar, $pop, $windspd);
-
-
 
 /* gets the data from a URL */
 function get_data($url) {
