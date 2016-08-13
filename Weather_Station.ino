@@ -1,341 +1,186 @@
-#include <SparkFunESP8266WiFi.h>
-#include <SoftwareSerial.h>
+#include <SPI.h>
+#include "Adafruit_GFX.h"
+#include "Adafruit_HX8357.h"
+#include <Wire.h>
+#include "Adafruit_STMPE610.h"
+#include <Process.h>
 #include <string.h>
 
-#define arraySize 250 //TODO set this to minimum needed
+// These are 'flexible' lines that can be changed
+#define SD_CS 4
+#define TFT_CS 12
+#define TFT_DC 8
+#define TFT_RST -1 // RST can be set to -1 if you tie it to Arduino's reset
 
-char data[arraySize]; //array for HTTP GET input
+// Color definitions
+#define BLACK    0x0000
+#define BLUE     0x001F
+#define RED      0xF800
+#define GREEN    0x07E0
+#define CYAN     0x07FF
+#define MAGENTA  0xF81F
+#define YELLOW   0xFFE0
+#define WHITE    0xFFFF
+
+/////////////////////////////////////////////////
+
+String logo = "http://arduino.cc/asciilogo.txt";
+String url = "http://wserv.ddns.net/weather.txt";
+char data[300];
+const unsigned long interval = 600000; //interval set for 10 min to pull data for gauges for a total of 288 API request / day
+unsigned long previousMillis = 0;
+
+int counter = 0;
 
 typedef struct WDATA //struct for weather data
 {
   int temp;
   int hum;
+  int dew;
   int pop;
   int bar;
 };
 
 WDATA wdata; 
-////////////////////////////////////////////
-/*... Server Connection Variables ...*/
 
-const char mySSID[] = "and meatballs";
-const char myPSK[] = "secretsquirrel";
-const String getStr = "GET ";
-String url;
-const String httpRequest = " HTTP/1.1\n" 
-                           "Host: 192.168.1.189\n"
-                           "Connection: close\n\n";
+const String destServer = "192.168.1.189";
 
-const char destServer[] = "192.168.1.189";
 ////////////////////////////////////////////
 /*...  Pin variables ...*/
 
-const int tempPin = 3;
-const int humPin = 5;
-const int popPin = 6;
-const int barPin = 10;
+
+const int tempPin = 11;
+const int humPin = 10;
+const int popPin = 9;
+const int barPin = 6;
+const int dewPin = 5;
 
 
-           /*******************
-           *   ... SETUP ...  *
-           *******************/
-           
+////////////////////////////////////////////
+
+Adafruit_HX8357 tft = Adafruit_HX8357(TFT_CS, TFT_DC, TFT_RST);
+Adafruit_STMPE610 touch = Adafruit_STMPE610();
+
 void setup() {
-
-//Pin Setup
-
-pinMode(tempPin, OUTPUT);
-pinMode(humPin, OUTPUT);
-pinMode(popPin, OUTPUT);
-pinMode(barPin, OUTPUT);
-
-//Wifi conect
   Serial.begin(9600);
+  Bridge.begin();
+  tft.begin(HX8357D);
+  touch.begin();
+
+tft.fillScreen(BLACK);
+tft.setCursor(0, 0);
+tft.setRotation(3);
+tft.setTextColor(WHITE);
+tft.setTextSize(1);
+runCurl(logo, 1);
+delay(3000);
+tft.setTextSize(4);
+tft.fillScreen(BLACK);
+tft.setCursor(0, 0);
   
-  // initializeESP8266() verifies communication with the WiFi
-  // shield, and sets it up.
-  initializeESP8266();
-
-  // connectESP8266() connects to the defined WiFi network.
-  connectESP8266();
-
-  // displayConnectInfo prints the Shield's local IP
-  // and the network it's connected to.
-  displayConnectInfo();
 
 
+} //End of Setup
+
+           /*****************
+           *   ... LOOP...  *
+           *****************/
+
+void loop() {
+
+
+unsigned long currentMillis = millis();
+Serial.println(currentMillis);
+if ((unsigned long)(currentMillis - previousMillis) >= interval)
+{
+  Serial.println("IF Started here ~~~~~~");
+  runCurl(url, 2);
+  parseData();
+  tft.fillScreen(BLACK);
+  tft.setCursor(0, 0);
+  tft.println(wdata.temp);
+  tft.println(wdata.hum);
+  tft.println(wdata.dew);
+  tft.println(wdata.pop);
+  tft.println(wdata.bar);  
+
+  writeData();
+  tft.println(counter);
+  counter++;
+  previousMillis = millis();
 }
 
-           /******************
-           *   ... LOOP ...  *
-           ******************/
-           
-void loop() {
-Serial.println();
- 
- url = getUrl();
-
- //remove last char 
- int strl = url.length() - 1;
- url.remove(strl);
- 
- Serial.println();
- Serial.println(url);
- 
-  getData(); //returns in char data
-  
-  Serial.println(F(".........."));
-  Serial.println(data);
-  Serial.println(F(".........."));
-  
-  parseData(); //returns wdata struct
-
-  Serial.println(wdata.temp);
-  Serial.println(wdata.hum);
-  Serial.println(wdata.pop);
-  Serial.println(wdata.bar);  
-
-  writeData(); //write data to gauges
-
-
-} // End of Loop
-
-//~~~~~~~~~~~~~~~~~~FUNCTIONS~~~~~~~~~~~~~~~~~~~~~~//
+} //END OF LOOP
 
            /**********************
-           *   ... GET DATA ...  *
+           *   ... Run Curl ...  *
            **********************/
-           
-void getData()
-{
-  
-  int index = 0; 
-  char inChar; //incoming data buffer
 
+void runCurl(String url, int i) {
 
-  ESP8266Client client;
-  
-  Serial.println(F("Getting data..."));
+  Process p;        // Create a process and call it "p"
+  p.begin("curl");  // Process that launch the "curl" command
+  p.addParameter(url); // Add the URL parameter to "curl"
+  p.run();      // Run the process and wait for its termination
 
-  int retVal = client.connect(destServer, 80); //connect to server
-  if (retVal <= 0)
+  if (i == 1)
   {
-    Serial.println(F("Failed to connect to server."));
-    return;
-  }
-  else
-  {
-    Serial.println(F("Connected to host."));
-  }
-
-/*.. GET request ..*/
-
- Serial.print(getStr + url + httpRequest);
- client.print(getStr + url + httpRequest);
-
-  //Serial.print(getStr + url);
-  //client.print(getStr + url);
-
- Serial.println();
-
-  /*.. get incoming data and put in data string ..*/
-  
-  while (client.available())
-  {
-    //Serial.write(client.read()); // read() gets the FIFO char
-      inChar = client.read();
-      data[index] = inChar;
-      index++;
-      data[index] = '\0'; // Add a null at the end
-  }
-  
-  // connected() is a boolean return value - 1 if the 
-  // connection is active, 0 if it's closed.
-  if (client.connected())
-    
-    client.stop(); // stop() closes a TCP connection.
-    Serial.println();
-    Serial.println(F("Disconected from Host."));
-    Serial.println(F("~~~~~~~~~~~~~~~~~~~~~~"));
-
-} //end of getData
-
-           /********************************
-           *   ... DisplayConnectInfo ...  *
-           ********************************/
-
-void displayConnectInfo()
-{
-  char connectedSSID[24];
-  memset(connectedSSID, 0, 24);
-  // esp8266.getAP() can be used to check which AP the
-  // ESP8266 is connected to. It returns an error code.
-  // The connected AP is returned by reference as a parameter.
-  int retVal = esp8266.getAP(connectedSSID);
-  if (retVal > 0)
-  {
-    Serial.print(F("Connected to: "));
-    Serial.println(connectedSSID);
-  }
-
-  // esp8266.localIP returns an IPAddress variable with the
-  // ESP8266's current local IP address.
-  IPAddress myIP = esp8266.localIP();
-  Serial.print(F("My IP: ")); Serial.println(myIP);
-}
-
-           /*****************************
-           *   ... Initialize Wifi ...  *
-           *****************************/
-           
-void initializeESP8266()
-{
-  // esp8266.begin() verifies that the ESP8266 is operational
-  // and sets it up for the rest of the sketch.
-  // It returns either true or false -- indicating whether
-  // communication was successul or not.
-  // true
-  int test = esp8266.begin();
-  if (test != true)
-  {
-    Serial.println(F("Error talking to ESP8266."));
-    errorLoop(test);
-  }
-  Serial.println(F("ESP8266 Shield Present"));
-}
-  
-           /*********************
-           *   ... Connect ...  *
-           *********************/
-           
-void connectESP8266()
-{
-  // The ESP8266 can be set to one of three modes:
-  //  1 - ESP8266_MODE_STA - Station only
-  //  2 - ESP8266_MODE_AP - Access point only
-  //  3 - ESP8266_MODE_STAAP - Station/AP combo
-  // Use esp8266.getMode() to check which mode it's in:
-  int retVal = esp8266.getMode();
-  if (retVal != ESP8266_MODE_STA)
-  { // If it's not in station mode.
-    // Use esp8266.setMode([mode]) to set it to a specified
-    // mode.
-    retVal = esp8266.setMode(ESP8266_MODE_STA);
-    if (retVal < 0)
+    while (p.available()>0) 
     {
-      Serial.println(F("Error setting mode."));
-      errorLoop(retVal);
+      char c = p.read();
+      tft.print(c);
     }
   }
-  Serial.println(F("Mode set to station"));
-
-  // esp8266.status() indicates the ESP8266's WiFi connect
-  // status.
-  // A return value of 1 indicates the device is already
-  // connected. 0 indicates disconnected. (Negative values
-  // equate to communication errors.)
-  retVal = esp8266.status();
-  if (retVal <= 0)
+  else if (i == 2)
   {
-    Serial.print(F("Connecting to "));
-    Serial.println(mySSID);
-    // esp8266.connect([ssid], [psk]) connects the ESP8266
-    // to a network.
-    // On success the connect function returns a value >0
-    // On fail, the function will either return:
-    //  -1: TIMEOUT - The library has a set 30s timeout
-    //  -3: FAIL - Couldn't connect to network.
-    retVal = esp8266.connect(mySSID, myPSK);
-    if (retVal < 0)
+    int n = 0;
+    while (p.available()>0) 
     {
-      Serial.println(F("Error connecting"));
-      errorLoop(retVal);
+      char c = p.read();
+      data[n] = c;
+      n++;
+      data[n] = '\0';
     }
   }
-} //end of connect
+} 
 
            /*************************
            *   ... Parse Wdata ...  *
            *************************/
+
 void parseData()
 {
 
    char dataT[sizeof(data) + 1];
    strcpy(dataT, data);
-                strtok(dataT, "<");
-   char *temp = strtok(NULL, ",");
+   char *temp = strtok(dataT, ",");
    char *hum = strtok(NULL, ",");
+   char *dew = strtok(NULL, ",");
    char *pop = strtok(NULL, ",");
-   char *bar = strtok(NULL, ">");
+   char *bar = strtok(NULL, "\0");
+  
 
    wdata.temp = atoi(temp);
    wdata.hum = atoi(hum);
    wdata.pop = atoi(pop);
    wdata.bar = atoi(bar);
+   wdata.dew = atoi(dew);
 }
 
            /****************************
            *   ... Write to gauge ...  *
            ****************************/
+
 void writeData()
 {
   wdata.temp = map(wdata.temp, -5, 105, 0, 255);
   wdata.hum = map(wdata.hum, 0, 100, 0, 255);
   wdata.pop = map(wdata.pop, 0, 100, 0, 255);
   wdata.bar = map(wdata.bar, 960, 1070, 0, 255);
-
+  wdata.dew = map(wdata.dew, 50, 100, 0, 255);
   analogWrite(tempPin, wdata.temp);
   analogWrite(humPin, wdata.hum);
   analogWrite(popPin, wdata.pop);
   analogWrite(barPin, wdata.bar);
+  analogWrite(dewPin, wdata.dew);
 }
-
-           /************************
-           *   ... Error Loop ...  *
-           ************************/
-           
-void errorLoop(int error)
-{
-  Serial.print(F("Error: ")); Serial.println(error);
-  Serial.println(F("Looping forever."));
-  for (;;)
-    ;
-}
-
-////////////////////////////////////////////////////////////
-
-        /*... TEMP FUNCTIONS FOR DEBUGGING ..*/
-        
-////////////////////////////////////////////////////////////
-// serialTrigger prints a message, then waits for something
-// to come in from the serial port.
-void serialTrigger(String message)
-{
-  Serial.println();
-  Serial.println(message);
-  Serial.println();
-  while (!Serial.available())
-    ;
-  while (Serial.available())
-    Serial.read();
-}
-
-
-/////////////////////////////////////////////////////////
-
-String getUrl()
-{
-  
-  String urlIn;
-  Serial.println(F("Enter address to GET"));
-  while(!Serial.available())
-  {}
-  if (Serial.available())
-  {
-    urlIn = Serial.readString();
-  }
-  return urlIn;
-}
-
-////////////////////////////////////////////////////////
-
